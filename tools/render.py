@@ -10,6 +10,10 @@ import re
 import subprocess
 
 os.environ.setdefault("MUJOCO_GL", "egl")
+# use the NVIDIA EGL vendor (GPU) rather than Mesa's CPU rasterizer when the image does not register it
+_NV_EGL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docker", "10_nvidia.json")
+if os.path.exists(_NV_EGL):
+    os.environ.setdefault("__EGL_VENDOR_LIBRARY_FILENAMES", os.path.abspath(_NV_EGL))
 import mujoco
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont

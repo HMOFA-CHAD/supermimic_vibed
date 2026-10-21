@@ -19,3 +19,5 @@ Times are local time (CEST, UTC+2) unless marked UTC. One GPU (RTX PRO 6000 Blac
 | 2026-10-21 18:57 | it 10000 (1.04 h train time): eval normalized return 0.811, 1/40 failed (fallAndGetUp2_subject3) |
 | 2026-10-21 19:10 | **RETURN TARGET REACHED**: it 12000 (1.24 h train time, ckpt saved 2026-10-21 17:05:52 UTC): eval normalized return 0.824 >= 0.82 (paper: 0.82 at 1.2 h on H100); 1/40 failed (jumps1_subject2) |
 | 2026-10-21 19:23 | **REPRODUCED (both criteria)**: it 14000, 1.47 h train time (ckpt saved 2026-10-21 17:19:24 UTC = 19:19 CEST): eval normalized return 0.829 >= 0.82 AND 0/40 clips failed |
+| 2026-10-21 19:31 | Training stopped by request at it ~15700 (1.67 h train time); last checkpoint ckpt_014000 (the 40/40 one) |
+| 2026-10-21 19:44 | Reproduction video rendered (results/supermimic_lafan1_it14000_reproduced.mp4); container removed, GPU released |

@@ -5,6 +5,24 @@ Model* (arXiv 2610.28480) — no official code is released, so everything here i
 the paper. Target experiment: the controlled LAFAN1 comparison (Fig. 4a): 40 G1-retargeted LAFAN1
 clips (2.45 h), one GPU; the paper reaches evaluation normalized return 0.82 after 1.2 h on an H100.
 
+Author: **Chong Zhang** (ETH Zurich). License: [MIT](LICENSE).
+
+> **Disclaimer:** this repository was speed-vibecoded in 1 hour with an AI coding
+> assistant. It
+> deliberately does not live under any lab's organization, because the code is too much "slop"
+> for that: fast and unreviewed. Use it at
+> your own risk.
+
+> **One G1 motion tracker for all 40 LAFAN1 clips, trained in only ~1.5 GPU-hours**
+> (1.47 h on a single RTX PRO 6000): evaluation return **0.829** with **0/40 failed clips**.
+> For scale, the paper's PPO-in-simulator baseline does not reach return 0.82 within 18 h on up to
+> 8 GPUs.
+
+![SuperMimic G1 tracking LAFAN1 motions](results/supermimic_lafan1_highlight.gif)
+
+*Solid robot: the trained policy simulated in Isaac Lab with MuJoCo-Warp. Blue ghost: the reference
+motion. Clips: dance, jumps, fall-and-get-up, sprint.*
+
 Progress and timestamps: [MILESTONES.md](MILESTONES.md).
 
 ## Layout
@@ -17,24 +35,96 @@ Progress and timestamps: [MILESTONES.md](MILESTONES.md).
 | `supermimic/` | implementation (see below) |
 | `tools/` | setup, asset conversion, tests, benchmark, plotting, rendering, failure analysis |
 | `logs/<run>/` | not tracked: `train_log.csv`, `eval.csv`, checkpoints, stdout |
-| `results/` | success curve (videos are rendered locally, not tracked) |
+| `results/` | success curve and highlight GIF (full videos are rendered locally with `tools/render.py`) |
 
-## Setup and usage
+## Setup
 
-* Physics: Newton with the MuJoCo-Warp solver (`NewtonCfg(MJWarpSolverCfg(...))`), no Kit, no PhysX.
-  50 Hz control, 4 substeps of 5 ms, implicitfast integrator, MuJoCo collision pipeline.
+Neither Isaac Lab nor any data is included in this repository; the steps below fetch them.
+
+**Requirements:** Linux, an NVIDIA GPU (tested: RTX PRO 6000 Blackwell, driver 580 / CUDA 13),
+Docker with the NVIDIA Container Toolkit (`docker run --gpus` must work), ~20 GB of disk for the
+images and ~0.2 GB for the data.
+
+Physics: Newton with the MuJoCo-Warp solver (`NewtonCfg(MJWarpSolverCfg(...))`), no Kit, no PhysX;
+50 Hz control, 4 substeps of 5 ms, implicitfast integrator, MuJoCo collision pipeline.
+
+### 1. Isaac Lab (kit-less Docker image)
+
+The code runs against Isaac Lab 3 `main` at commit
+[`46d6cc3`](https://github.com/isaac-sim/IsaacLab/commit/46d6cc3d7b115906fad12efd372fbf69f4e3d3ed)
+(VERSION 3.0.0), unmodified, inside Isaac Lab's **kit-less** image (no Isaac Sim / Kit, no PhysX).
+Newer `main` commits may work but are untested.
 
 ```bash
-tools/setup.sh                      # clone Isaac Lab @ 46d6cc3, build the kit-less + supermimic images
-docker/run_container.sh 0 128g      # container 'supermimic' on GPU 0 with a 128 GB memory cap
-tools/download_data.sh              # motions + G1 description, MJCF/USD conversion
+tools/setup.sh
+```
+
+which is equivalent to:
+
+```bash
+git clone https://github.com/isaac-sim/IsaacLab.git
+git -C IsaacLab checkout 46d6cc3d7b115906fad12efd372fbf69f4e3d3ed
+(cd IsaacLab && docker build -f docker/Dockerfile.kitless -t isaac-lab-kitless:main-46d6cc3 .)
+docker build -t supermimic:latest docker/     # + tmux, ffmpeg, gcc, NVIDIA EGL vendor file
+```
+
+Then start the long-lived container (repository mounted at `/workspace/supermimic`):
+
+```bash
+docker/run_container.sh 0 128g     # GPU index 0, 128 GB memory cap
+```
+
+### 2. Data: LAFAN1 motions and the G1 model
+
+| What | Source | License | Goes to |
+|---|---|---|---|
+| 40 LAFAN1 clips retargeted to the 29-DoF G1 (30 fps CSV: root pos, root quat xyzw, 29 joint angles) | HF [`lvhaidong/LAFAN1_Retargeting_Dataset`](https://huggingface.co/datasets/lvhaidong/LAFAN1_Retargeting_Dataset), folder `g1/` | CC BY-NC-ND 4.0 (Ubisoft La Forge) | `data/lafan1_g1/*.csv` |
+| G1 description `g1_29dof_rev_1_0.urdf` + meshes (the model the clips were retargeted to) | same dataset, folder `robot_description/g1/` | BSD-3-Clause (Unitree) | `data/g1_description/` |
+
+With the container from step 1 running:
+
+```bash
+tools/download_data.sh
+```
+
+It downloads both, then converts the robot inside the container:
+`tools/urdf_to_mjcf.py` compiles the URDF into `data/g1_description/g1_29dof.xml` (free-floating
+pelvis), and `tools/mjcf_to_usd.py` converts that MJCF to `data/g1_usd/g1_29dof/g1_29dof.usda`,
+which Isaac Lab spawns. The conversion is offline because the kit-less importers cannot run inside
+an Isaac Lab process (see Deviations). Expected result:
+
+```
+data/
+├── lafan1_g1/                  40 CSVs (dance, fallAndGetUp, fight, jumps, run, sprint, walk)
+├── g1_description/
+│   ├── g1_29dof_rev_1_0.urdf
+│   ├── g1_29dof.xml            generated MJCF
+│   └── meshes/*.STL            38 meshes
+└── g1_usd/g1_29dof/            generated USD (+ payloads/)
+```
+
+Check: `ls data/lafan1_g1 | wc -l` prints `40`, and the clips total 264,705 frames at 30 fps
+(2.45 h). `tools/test_env.py` checks the converted robot against the reference motions (FK vs.
+simulator should agree to ~1e-6):
+
+```bash
+docker exec supermimic python tools/test_env.py
+```
+
+## Usage
+
+```bash
 CPUS=0-23 ./run_train.sh lafan1_main          # training in tmux session 'lafan1_main' (optional CPU pinning)
 docker exec -it supermimic tmux attach -t lafan1_main
 docker exec supermimic tmux new -d -s eval_main "cd /workspace/supermimic && python supermimic/evaluate.py --run_dir logs/lafan1_main --watch"
 docker exec supermimic python tools/plot.py logs/lafan1_main --out results/success_curve.png
 docker exec supermimic python supermimic/evaluate.py --run_dir logs/lafan1_main --ckpt logs/lafan1_main/ckpt_014000.pt --record traj.npz
-docker exec supermimic bash -c "MUJOCO_GL=egl python tools/render.py traj.npz out.mp4 --clips dance2_subject1 --seconds 10"
+docker exec supermimic python tools/render.py traj.npz out.mp4 --clips dance2_subject1 --seconds 10
 ```
+
+The first iterations are slow while `torch.compile` builds its kernels (cached in `.cache/`).
+Checkpoints are written every 2000 iterations to `logs/<run>/`; the eval watcher scores each on all
+40 clips and appends to `logs/<run>/eval.csv`.
 
 ## Result (LAFAN1, 40 clips, one RTX PRO 6000 Blackwell)
 
@@ -102,4 +192,11 @@ Evaluation return 0.824 at 1.24 h of training (paper: 0.82 at 1.2 h on an H100) 
   the authors.
 * Isaac Lab (BSD-3-Clause), Newton and MuJoCo-Warp (Apache-2.0) are used unmodified.
 * LAFAN1 motions (Ubisoft La Forge): CC BY-NC-ND 4.0; G1 retargets and description by Unitree
-  (BSD-3-Clause). Neither is redistributed here.
+  (BSD-3-Clause). The motion data is not redistributed here; the demo GIF shows the
+  reference motions for illustration only and is not covered by this repository's MIT license.
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE).
+
+Copyright (c) 2026 ETH Zurich, Chong Zhang.
