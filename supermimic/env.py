@@ -22,6 +22,7 @@ from isaaclab.utils import configclass, instantiate, replace
 
 from .mdp import MAX_STEP_REWARD, MDP, flatten_state
 from .motion import CONTROL_DT, MotionLib
+from .reset_sampling import update_bin_returns
 from .robot import G1_CFG, G1_JOINT_NAMES, action_scale
 from .rotations import mat_to_quat, quat_to_mat, so3_exp
 
@@ -223,7 +224,7 @@ class TrackingSim:
             boot = torch.where(term[ids], 0.0, (self.gamma**T) * (self.ep_ret[ids] / T) / (1 - self.gamma))
             G = self.ep_disc_ret[ids] + boot
             b = self.start_bin[ids]
-            self.bin_G.index_put_((b,), 0.8 * self.bin_G[b] + 0.2 * G)
+            update_bin_returns(self.bin_G, b, G)
             out["ep_len"] = T
             out["ep_ret_norm"] = self.ep_ret[ids] / (T * MAX_STEP_REWARD)
             self.reset(ids)
